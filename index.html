@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+  <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>In Your Eyes - Audio Sync</title>
+    <title>In Your Eyes - Final Audio Loop</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -66,26 +66,17 @@
         let startTime = 0;
         let audio = null;
         
-        // Настройки тайминга аудио (в секундах)
-        const AUDIO_START = 321.0; // 5 минут 21 секунда
-        const AUDIO_END = 337.0;   // 5 минут 37 секунд (ровно 16 сек цикл)
-
+        // Обновленная функция старта для короткого (обрезанного) трека
         function startSequence() {
             if (!isStarted) {
                 isStarted = true;
                 startTime = performance.now();
                 audio = new Audio('music.mp3');
                 
-                // Устанавливаем время старта
-                audio.currentTime = AUDIO_START;
-                audio.play().catch(e => console.log("Ожидание аудио:", e));
+                // Простая и надежная команда зацикливания для всех браузеров
+                audio.loop = true; 
                 
-                // Проверка и зацикливание нужного отрезка
-                audio.addEventListener('timeupdate', function() {
-                    if (this.currentTime >= AUDIO_END) {
-                        this.currentTime = AUDIO_START; // Возврат на 5:21
-                    }
-                });
+                audio.play().catch(e => console.log("Ожидание аудио:", e));
             }
         }
         window.addEventListener('click', startSequence);
