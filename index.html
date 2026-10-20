@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>In Your Eyes - Audio Sync</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #030304;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="terminal"></canvas>
+
+    <script>
+        const canvas = document.getElementById('terminal');
+        const ctx = canvas.getContext('2d');
+
+        const CHAR_W = 9;
+        const CHAR_H = 16;
+        let COLS, ROWS;
+
+        const ramp = " .':,-~=+*#%@";
+        const codeText = "in_your_eyes=np.exp(-((r-0.36)/0.05)**2)*radial+heart_pulse ";
+        const bgChars = "010189347X@#=%*";
+
+        const NUM_STARS = 120;
+        const stars = [];
+        for (let i = 0; i < NUM_STARS; i++) {
+            stars.push({
+                x: (Math.random() - 0.5) * 8.0, 
+                y: (Math.random() - 0.5) * 4.0,
+                z: Math.random(),
+                flare: Math.random() > 0.65
+            });
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            COLS = Math.floor(canvas.width / CHAR_W);
+            ROWS = Math.floor(canvas.height / CHAR_H);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function clamp(v, min, max) { return v < min ? min : (v > max ? max : v); }
+        function smoothstep(edge0, edge1, x) {
+            const t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t);
+        }
+
+        let isStarted = false;
+        let startTime = 0;
+        let audio = null;
+        
+        // Настройки тайминга аудио (в секундах)
+        const AUDIO_START = 321.0; // 5 минут 21 секунда
+        const AUDIO_END = 337.0;   // 5 минут 37 секунд (ровно 16 сек цикл)
+
+        function startSequence() {
+            if (!isStarted) {
+                isStarted = true;
+                startTime = performance.now();
+                audio = new Audio('music.mp3');
+                
+                // Устанавливаем время старта
+                audio.currentTime = AUDIO_START;
+                audio.play().catch(e => console.log("Ожидание аудио:", e));
+                
+                // Проверка и зацикливание нужного отрезка
+                audio.addEventListener('timeupdate', function() {
+                    if (this.currentTime >= AUDIO_END) {
+                        this.currentTime = AUDIO_START; // Возврат на 5:21
+                    }
+                });
+            }
+        }
+        window.addEventListener('click', startSequence);
+        window.addEventListener('touchstart', startSequence);
+
+        function render(now) {
+            ctx.fillStyle = "#030304";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = "bold 14px monospace";
+            ctx.textBaseline = "top";
+
+            if (!isStarted) {
+                // СТАРТОВЫЙ ЭКРАН С НАДПИСЬЮ
+                for (let row = 0; row < ROWS; row++) {
+                    for (let col = 0; col < COLS; col++) {
+                        const bgIdx = Math.floor(Math.abs(col * 13 + row * 17 + now * 0.008)) % bgChars.length;
+                        ctx.fillStyle = "#15181e"; 
+                        ctx.fillText(bgChars[bgIdx], col * CHAR_W, row * CHAR_H);
+                    }
+                }
+                ctx.save();
+                const alpha = 0.5 + 0.5 * Math.sin(now / 300);
+                const textY = canvas.height / 2;
+                
+                ctx.fillStyle = "rgba(3, 3, 4, 0.85)";
+                ctx.fillRect(0, textY - 30, canvas.width, 60);
+
+                ctx.fillStyle = `rgba(255, 51, 102, ${alpha})`;
+                ctx.font = "bold 20px monospace";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("> INITIATE SEQUENCE <", canvas.width / 2, textY);
+                ctx.restore();
+
+            } else {
+                // ОСНОВНАЯ АНИМАЦИЯ
+                const t = ((now - startTime) / 1000) % 16.0;
+
+                let openAmount = smoothstep(0.0, 1.2, t);
+                if (t > 1.8 && t < 2.3) { openAmount *= Math.abs((t - 2.05) / 0.25); }
+
+                const zoomProgress = smoothstep(3.2, 9.5, t);
+                const zoom = 1.0 + Math.pow(zoomProgress, 3.2) * 28.0;
+
+                const spaceAlpha = smoothstep(4.5, 7.8, t);
+                const heartAlpha = smoothstep(9.5, 11.8, t);
+                const beat = 1.0 + 0.06 * Math.pow(Math.max(0, Math.sin(t * 5.5)), 4.0);
+
+                for (let s of stars) {
+                    s.z -= 0.0045 * (1.0 + spaceAlpha * 1.5);
+                    if (s.z <= 0.05) {
+                        s.z = 1.0;
+                        s.x = (Math.random() - 0.5) * 8.0;
+                        s.y = (Math.random() - 0.5) * 4.0;
+                    }
+                }
+
+                const gridAspect = COLS / ROWS;
+
+                for (let row = 0; row < ROWS; row++) {
+                    const screenV = -((row / ROWS) * 2.0 - 1.0) * 1.0;
+                    for (let col = 0; col < COLS; col++) {
+                        const screenU = ((col / COLS) * 2.0 - 1.0) * gridAspect * 0.65;
+                        const u = screenU / zoom;
+                        const v = screenV / zoom;
+
+                        let rCol = 0, gCol = 0, bCol = 0;
+
+                        if (zoom < 18.0) {
+                            const u2 = u * u;
+                            const upper = (0.36 * (1.0 - u2 * 1.15)) * openAmount - 0.05 * (1.0 - openAmount);
+                            const lower = (-0.25 * (1.0 - u2 * 1.25)) * openAmount - 0.05 * (1.0 - openAmount);
+                            const insideEye = (v < upper) && (v > lower) && (Math.abs(u) < 0.92);
+
+                            if (insideEye) {
+                                const r = Math.hypot(u, v);
+                                const angle = Math.atan2(v, u);
+                                const scleraShade = clamp(1.0 - 0.35 * (u2 + v * v), 0.4, 1.0) * (1.0 - 0.45 * Math.exp(-Math.pow((v - upper) / 0.07, 2)));
+                                let er = 0.92 * scleraShade, eg = 0.93 * scleraShade, eb = 0.96 * scleraShade;
+                                const irisRadius = 0.38;
+                                
+                                if (r < irisRadius) {
+                                    const radial = 0.5 + 0.5 * Math.sin(angle * 28.0 + Math.sin(r * 22.0) * 2.0) * Math.cos(angle * 13.0 - r * 10.0);
+                                    const h1 = 0.5 + 0.5 * Math.cos(angle * 19.0 + r * 15.0);
+                                    let ir = 0.24 * (0.3 + 0.7 * radial) + 0.62 * (0.35 + 0.65 * h1) * (1.0 - r / irisRadius);
+                                    let ig = 0.11 * (0.3 + 0.7 * radial) + 0.32 * (0.35 + 0.65 * h1) * (1.0 - r / irisRadius);
+                                    let ib = 0.04 * (0.3 + 0.7 * radial) + 0.12 * (0.35 + 0.65 * h1) * (1.0 - r / irisRadius);
+                                    const limbal = Math.exp(-Math.pow((r - 0.355) / 0.045, 2));
+                                    ir *= (1.0 - 0.72 * limbal); ig *= (1.0 - 0.75 * limbal); ib *= (1.0 - 0.78 * limbal);
+                                    const lidShadow = 1.0 - 0.5 * Math.exp(-Math.pow((v - upper) / 0.08, 2));
+                                    er = ir * lidShadow; eg = ig * lidShadow; eb = ib * lidShadow;
+                                    const pupilMask = smoothstep(0.12, 0.145, r);
+                                    er *= pupilMask; eg *= pupilMask; eb *= pupilMask;
+                                }
+
+                                const sp1 = Math.exp(-(Math.pow(u + 0.11, 2) + Math.pow(v - 0.10, 2)) / 0.0018);
+                                const sp2 = Math.exp(-(Math.pow(u - 0.13, 2) + Math.pow(v + 0.08, 2)) / 0.0008);
+                                const spec = clamp(sp1 + sp2, 0.0, 1.0) * (1.0 - zoomProgress);
+                                er += (1.0 - er) * spec; eg += (0.98 - eg) * spec; eb += (0.95 - eb) * spec;
+                                rCol = er; gCol = eg; bCol = eb;
+                            } else {
+                                const distFromCenter = Math.hypot(u * 0.75, v * 0.95);
+                                const vignette = clamp(1.0 - Math.pow(distFromCenter * 0.85, 2.2), 0.0, 1.0);
+                                const cr_pos = upper + 0.15 * (1.0 - u2 * 0.6);
+                                const crease = Math.exp(-Math.pow((v - cr_pos) / 0.032, 2)) * clamp(1.0 - u2, 0.0, 1.0);
+                                const upperLash = Math.exp(-Math.pow((v - upper) / 0.042, 2)) * clamp(1.0 - u2 * 1.1, 0.0, 1.0);
+                                const lowerLash = Math.exp(-Math.pow((v - lower) / 0.035, 2)) * clamp(1.0 - u2 * 1.2, 0.0, 1.0);
+                                const lowerBag = Math.exp(-Math.pow((v + 0.42) / 0.15, 2)) * 0.35;
+                                const darkFactor = clamp(1.0 - 0.55 * crease - 0.88 * upperLash - 0.55 * lowerLash - lowerBag, 0.08, 1.0);
+                                rCol = 0.82 * darkFactor * vignette;
+                                gCol = 0.48 * darkFactor * vignette;
+                                bCol = 0.29 * darkFactor * vignette;
+                            }
+
+                            const eyeFade = 1.0 - smoothstep(0.55, 0.95, zoomProgress);
+                            rCol *= eyeFade; gCol *= eyeFade; bCol *= eyeFade;
+                        }
+
+                        if (spaceAlpha > 0.01) {
+                            for (let s of stars) {
+                                const sx = s.x / s.z, sy = s.y / s.z;
+                                const dx = Math.abs(screenU - sx), dy = Math.abs(screenV - sy);
+                                if (dx < 0.22 && dy < 0.22) {
+                                    const brightness = (1.0 - s.z) * spaceAlpha;
+                                    let starVal = Math.exp(-(dx * dx + dy * dy) / 0.00045);
+                                    if (s.flare) {
+                                        starVal = Math.max(starVal, (Math.exp(-dy / 0.008) * Math.exp(-dx / 0.075) + Math.exp(-dx / 0.008) * Math.exp(-dy / 0.075)) * 0.85);
+                                    }
+                                    rCol += starVal * brightness * 0.95;
+                                    gCol += starVal * brightness * 0.92;
+                                    bCol += starVal * brightness * 1.0;
+                                }
+                            }
+                        }
+
+                        if (heartAlpha > 0.01) {
+                            const hx = screenU / (0.62 * beat);
+                            const hy = (screenV + 0.08) / (0.62 * beat);
+                            const a = hx * hx + hy * hy - 1.0;
+                            const hVal = a * a * a - hx * hx * Math.pow(hy, 3);
+                            if (hVal < 0.0) {
+                                const depth = Math.pow(clamp(-hVal, 0.0, 1.2), 0.38);
+                                const light = Math.exp(-(Math.pow(hx + 0.28, 2) + Math.pow(hy - 0.35, 2)) / 0.45);
+                                const scanline = 0.82 + 0.18 * Math.sin(row * 1.5);
+                                const hr = (0.35 + 0.65 * depth + 0.25 * light) * scanline;
+                                const hg = (0.06 + 0.22 * depth + 0.25 * light) * scanline;
+                                const hb = (0.14 + 0.34 * depth + 0.28 * light) * scanline;
+                                rCol = rCol * (1.0 - heartAlpha) + hr * heartAlpha;
+                                gCol = gCol * (1.0 - heartAlpha) + hg * heartAlpha;
+                                bCol = bCol * (1.0 - heartAlpha) + hb * heartAlpha;
+                            } else if (hVal < 0.35) {
+                                const glow = Math.exp(-hVal * 11.0) * 0.45 * heartAlpha;
+                                rCol += glow * 0.95; gCol += glow * 0.18; bCol += glow * 0.35;
+                            }
+                        }
+
+                        rCol = clamp(rCol, 0.0, 1.0);
+                        gCol = clamp(gCol, 0.0, 1.0);
+                        bCol = clamp(bCol, 0.0, 1.0);
+                        const lum = 0.299 * rCol + 0.587 * gCol + 0.114 * bCol;
+
+                        if (lum > 0.025) {
+                            let ch = lum > 0.22 ? codeText[(col + row * 7) % codeText.length] : ramp[Math.min(ramp.length - 1, Math.floor(lum * ramp.length))];
+                            ctx.fillStyle = `rgb(${Math.floor(rCol * 255)},${Math.floor(gCol * 255)},${Math.floor(bCol * 255)})`;
+                            ctx.fillText(ch, col * CHAR_W, row * CHAR_H);
+                        } else {
+                            const bgIdx = Math.floor(Math.abs(col * 13 + row * 17 + (now - startTime) * 0.008)) % bgChars.length;
+                            ctx.fillStyle = "#15181e"; 
+                            ctx.fillText(bgChars[bgIdx], col * CHAR_W, row * CHAR_H);
+                        }
+                    }
+                }
+            }
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
